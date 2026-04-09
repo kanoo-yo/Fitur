@@ -1,2 +1,0 @@
-# Fitur
-Kumpulan pitur aja
