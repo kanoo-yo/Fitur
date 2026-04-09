@@ -17,7 +17,7 @@ let handler = async (m, { conn }) => {
 
   if (!/image/.test(mime)) return conn.reply(
     m.chat,
-    'Reply atau kirim gambar dengan caption\nContoh: .hitamkan',
+    'Reply atau kirim gambar dengan caption\nContoh: .jadikomik',
     global.fstatus
   )
 
