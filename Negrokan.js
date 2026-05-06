@@ -2,66 +2,145 @@
 * Fitur: hitamkan
 * Author: kanoo
 * Req: tio
-* Api: https://api.nexray.web.id
 */
 
-import fetch from 'node-fetch'
+import axios from 'axios'
+import crypto from 'crypto'
 import FormData from 'form-data'
 
-let handler = async (m, { conn }) => {
+async function live3d(buffer, prompt) {
+  const config = {
+    pkey: "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlHZk1BMEdDU3FHU0liM0RRRUJBUVVBQTRHTkFEQ0JpUUtCZ1FDd2xPK2JvQzZjd1JvM1VmWFZCYWRhWXdjWDB6S1MyZnVWTlkycVowZGd3YjFOSisvUTlGZUFvc0w0T05pb3NENzFvbjNQVllxUlVsTDUwNDVtdkgySzlpOGJBRlZNRWlwN0U2Uk1LNnRLQUFpZjd4elpyWG5QMUdaNVJpanRxZGd3aCtZbXpUbzM5Y3VCQ3NacUs5b0VvZVEzci9teUc5Uys5Y1I1aHVUdUZRSURBUUFCCi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQ==",
+    aid: "aifaceswap",
+    uid: "1H5tRtzsBkqXcaJ",
+    origin: "8f3f0c7387123ae0",
+    theme_version: '83EmcUoQTUv50LhNx0VrdcK8rcGexcP35FcZDcpgWsAXEyO4xqL5shCY6sFIWB2Q',
+    model: 'nano_banana_2',
+  }
 
-  let q = m.quoted ? m.quoted : m
-  let mime = (q.msg || q).mimetype || ''
+  let currentFp = crypto.randomBytes(16).toString('hex')
 
-  if (!/image/.test(mime)) return conn.reply(
-    m.chat,
-    'Reply atau kirim gambar dengan caption\nContoh: .hitamkan',
-    global.fstatus
-  )
+  const crypt = {
+    aes: (data, key) => {
+      const cipher = crypto.createCipheriv('aes-128-cbc', key, key)
+      return Buffer.concat([cipher.update(data, 'utf8'), cipher.final()]).toString('base64')
+    },
+    rsa: (data) => {
+      return crypto.publicEncrypt({
+        key: Buffer.from(config.pkey, 'base64').toString(),
+        padding: crypto.constants.RSA_PKCS1_PADDING,
+      }, Buffer.from(data, 'utf8')).toString('base64')
+    }
+  }
 
-  await m.reply('WET SEDANG DI NEGROKAN😡')
+  const api = axios.create({
+    baseURL: 'https://app-v1.live3d.io',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 16; NX729J) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.7499.34 Mobile Safari/537.36',
+      'origin': 'https://live3d.io',
+      'referer': 'https://live3d.io/',
+      'theme-version': config.theme_version
+    }
+  })
 
-  try {
-    let media = await q.download()
+  api.interceptors.request.use((cfg) => {
+    const [i, d, n] = [
+      crypto.randomBytes(8).toString('hex'),
+      crypto.randomUUID(),
+      Math.floor(Date.now() / 1000)
+    ]
 
-    let form = new FormData()
-    form.append('image', media, 'image.jpg')
-    form.append(
-      'param',
-      'Hitamkan warna kulit karakter ini menjadi hitam pekat, bukan coklat ingat hanya kulit saja jangan sentuh aspek lain'
-    )
+    const s = crypt.rsa(i)
+    const signStr = cfg.url.includes('upload-img') ? `${config.aid}:${d}:${s}` : `${config.aid}:${config.uid}:${n}:${d}:${s}`
 
-    let res = await fetch('https://api.nexray.web.id/ai/nanobanana', {
-      method: 'POST',
-      body: form,
-      headers: form.getHeaders()
+    Object.assign(cfg.headers, {
+      'fp': currentFp,
+      'fp1': crypt.aes(`${config.aid}:${currentFp}`, i),
+      'x-guide': s,
+      'x-sign': crypt.aes(signStr, i),
+      'x-code': Date.now().toString()
     })
 
-    if (!res.ok) throw new Error(await res.text())
+    return cfg
+  })
 
-    let buffer = Buffer.from(await res.arrayBuffer())
+  const form = new FormData()
+  form.append('file', buffer, { filename: 'input.jpg', contentType: 'image/jpeg' })
+  form.append('fn_name', 'demo-image-editor')
+  form.append('request_from', '9')
+  form.append('origin_from', config.origin)
 
-    await conn.sendFile(
-      m.chat,
-      buffer,
-      'hitamkan.jpg',
-      'AWOKAOWKAOWK HITAM🫵😂',
-      global.fstatus
-    )
+  const { data: upRes } = await api.post('/aitools/upload-img', form, {
+    headers: form.getHeaders()
+  })
+
+  const { data: job } = await api.post('/aitools/of/create', {
+    fn_name: 'demo-image-editor',
+    call_type: 3,
+    input: {
+      model: config.model,
+      source_images: [upRes.data.path],
+      prompt,
+      aspect_radio: 'auto',
+      request_from: 9
+    },
+    data: '',
+    request_from: 9,
+    origin_from: config.origin
+  })
+
+  const taskId = job.data.task_id
+  if (!taskId) throw new Error('TaskId cannot be found')
+
+  while (true) {
+    const { data: status } = await api.post('/aitools/of/check-status', {
+      task_id: taskId,
+      fn_name: 'demo-image-editor',
+      call_type: 3,
+      request_from: 9,
+      origin_from: config.origin
+    })
+
+    if (status.data.status === 2) {
+      return 'https://temp.live3d.io/' + status.data.result_image
+    } else if (status.data.status === 3) {
+      throw new Error('Task failed')
+    }
+
+    await new Promise(r => setTimeout(r, 3000))
+  }
+}
+
+const PROMPT = 'Ubah warna kulit karakter menjadi hitam pekat (#000000)'
+
+let handler = async (m, { conn }) => {
+  const isImage = m.mtype === 'imageMessage'
+  const isQuotedImage = m.quoted?.mtype === 'imageMessage'
+
+  if (!isImage && !isQuotedImage) throw `Kirim/quote gambar dulu!`
+
+  await conn.sendMessage(m.chat, { text: 'WET SEGERA KITA HITAMKAN 😡' }, { quoted: m })
+
+  try {
+    const msg = isImage ? m : m.quoted
+    const buffer = await msg.download()
+
+    const imageUrl = await live3d(buffer, PROMPT)
+    const resultBuffer = await axios.get(imageUrl, { responseType: 'arraybuffer' })
+
+    await conn.sendMessage(m.chat, {
+      image: Buffer.from(resultBuffer.data),
+      caption: `AWOKAWOKAWOK ARENG😂😂`
+    }, { quoted: m })
 
   } catch (e) {
-    console.log('Hitamkan Error:', e)
-    conn.reply(
-      m.chat,
-      'API error.',
-      global.fstatus
-    )
+    console.error(e)
+    throw typeof e === 'string' ? e : `Gagal memproses gambar`
   }
 }
 
 handler.help = ['hitamkan']
 handler.tags = ['ai']
-handler.command = /^hitamkan$/i
-handler.limit = true
+handler.command = /^(hitamkan)$/i
 
 export default handler
